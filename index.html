@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spark Partitions</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400&family=Silkscreen&family=Space+Mono:wght@400;700&family=Archivo:wdth,wght@75,800;100,800&display=block" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; background: #E4E1D4; overflow: hidden }
+  svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
+  .hdr { font-family: 'Silkscreen', monospace; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .space { font-family: 'Space Mono', monospace; font-weight: 700; }
+  .sans { font-family: 'IBM Plex Sans', sans-serif; }
+  .display { font-family: 'Archivo', sans-serif; font-weight: 800; font-stretch: 75%; }
+</style>
+</head>
+<body>
+<!--
+  Motion2Code rebuild of "Spark Partitions Animation" (1080x1920, 80.47 s).
+  Contract: window.anim = { tl, duration, seek(t), play(from), pause() }; ?t= freezes, ?external=1 does not autoplay;
+  <html data-ready="1"> once fonts are loaded and frame 0 is drawn.
+  The presenter webcam card of the source is left out: only the graphics are rebuilt.
+  Everything visible is a pure function of t: render(t) resets each scene and draws the shots active at t.
+-->
+<svg id="stage" viewBox="0 0 1080 1920" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="frame"><rect width="1080" height="1920"/></clipPath>
+    <radialGradient id="bgGrad" cx="540" cy="700" r="1250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F2EFE2"/><stop offset="0.55" stop-color="#E6E3D6"/><stop offset="1" stop-color="#CFCCBF"/>
+    </radialGradient>
+    <pattern id="gridPat" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M12.5 0V24M0 12.5H24" stroke="#5A5440" stroke-opacity="0.075" stroke-width="1" fill="none"/>
+    </pattern>
+    <pattern id="stripes" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+      <rect width="16" height="16" fill="#3E7A68"/><rect width="7" height="16" fill="#5E9585"/>
+    </pattern>
+    <pattern id="hatch" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+      <rect width="12" height="12" fill="#E2DED0"/><rect width="5" height="12" fill="#D2CDBD"/>
+    </pattern>
+    <linearGradient id="funnelGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EEEBE0"/><stop offset="0.5" stop-color="#E3DFD2"/><stop offset="1" stop-color="#CDC8B8"/>
+    </linearGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="10"/></filter>
+    <filter id="soft24" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="24"/></filter>
+    <filter id="soft4" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4"/></filter>
+    <filter id="soft2" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.6"/></filter>
+  </defs>
+  <g clip-path="url(#frame)">
+    <rect id="bg" width="1080" height="1920" fill="url(#bgGrad)"/>
+    <rect id="grid" width="1080" height="1920" fill="url(#gridPat)"/>
+    <g id="scenes"></g>
+    <g id="header"></g>
+  </g>
+</svg>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script>
+(() => {
+const SRC_DUR = 950 / 30; // 31.6s
+const CUTS = [];
+const DUR = 90.0;
+const toSource = t => { for (const [s, e] of CUTS) if (t >= s) t += e - s; return t; };
+const NS = 'http://www.w3.org/2000/svg';
+const C = {
+  ink: '#1E1A14', inkSoft: '#3A342C', gray: '#6E685B', grayLight: '#9C9585', line: '#CBC7B8',
+  paper: '#EFECE0', paperDark: '#E3DFD1', side: '#DCD8C9', sideDark: '#D2CDBC',
+  green: '#3D7A62', greenDim: '#B9C4B2', red: '#A23B2C', redDim: '#E3B9AC',
+  blue: '#24428A', blueLight: '#C9D4EA', orange: '#C98A4B', term: '#1F1B15', termText: '#E9E4D6'
+};
+
+// ---------- helpers ----------
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const EC = {}; const ease = n => EC[n] || (EC[n] = gsap.parseEase(n));
+const prog = (t, a, b, e = 'none') => ease(e)(clamp((t - a) / (b - a)));
+function kf(t, K) {
+  if (t <= K[0][0]) return K[0][1];
+  for (let i = 1; i < K.length; i++) if (t <= K[i][0]) {
+    const [t0, v0] = K[i - 1], [t1, v1, e] = K[i];
+    const p = ease(e || 'power1.inOut')((t - t0) / (t1 - t0));
+    return Array.isArray(v0) ? v0.map((x, j) => lerp(x, v1[j], p)) : lerp(v0, v1, p);
+  }
+  return K[K.length - 1][1];
+}
+const f1 = v => (Math.round(v * 10) / 10).toString();
+const rnd = (s => () => (s = (s * 16807) % 2147483647) / 2147483647)(20240315);
+function E(tag, attrs = {}, parent = null) {
+  const el = document.createElementNS(NS, tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+function T(parent, str, attrs) { const el = E('text', attrs, parent); el.textContent = str; return el; }
+const S = (el, attrs) => { for (const k in attrs) el.setAttribute(k, attrs[k]); };
+const show = (el, on) => { el.style.display = on ? '' : 'none'; };
+const op = (el, v) => { el.setAttribute('opacity', f1(clamp(v) * 100) / 100); show(el, v > 0.001); };
+const pts = P => P.map(p => f1(p[0]) + ',' + f1(p[1])).join(' ');
+const poly = (P) => 'M' + P.map(p => f1(p[0]) + ' ' + f1(p[1])).join('L') + 'Z';
+const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
+const mix = (a, b, p) => [lerp(a[0], b[0], p), lerp(a[1], b[1], p)];
+const hex = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+const mixColor = (a, b, p) => { const A = hex(a), B = hex(b); return 'rgb(' + A.map((x, i) => Math.round(lerp(x, B[i], clamp(p)))).join(',') + ')'; };
+const fmt = n => Math.round(n).toLocaleString('en-US');
+// affine matrix that maps a local w x h rectangle onto a face given by its top-left, top-right and bottom-left corners
+const faceMatrix = (TL, TR, BL, w, h) =>
+  `matrix(${[(TR[0] - TL[0]) / w, (TR[1] - TL[1]) / w, (BL[0] - TL[0]) / h, (BL[1] - TL[1]) / h, TL[0], TL[1]].map(v => +v.toFixed(4)).join(' ')})`;
+
+// plane homography from four correspondences (solved once, 8x8 Gauss-Jordan)
+function homography(src, dst) {
+  const A = [], b = [];
+  src.forEach(([u, v], i) => {
+    const [x, y] = dst[i];
+    A.push([u, v, 1, 0, 0, 0, -x * u, -x * v]); b.push(x);
+    A.push([0, 0, 0, u, v, 1, -y * u, -y * v]); b.push(y);
+  });
+  const n = 8, M = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]];
+    for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  const h = M.map((r, i) => r[n] / r[i]);
+  return (u, v) => { const w = h[6] * u + h[7] * v + 1; return [(h[0] * u + h[1] * v + h[2]) / w, (h[3] * u + h[4] * v + h[5]) / w]; };
+}
+
+// A hand-placed perspective box: front face is a w x h rectangle rotated by rot around its bottom centre,
+// the top face is the front-top edge pushed back by (sx, -d), sx growing away from the vanishing x.
+function boxGeom(g) {
+  const r = (g.rot || 0) * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  const P = (x, y) => [g.cx + x * c - y * s, g.by + x * s + y * c];
+  const FBL = P(-g.w / 2, 0), FBR = P(g.w / 2, 0), FTR = P(g.w / 2, -g.h), FTL = P(-g.w / 2, -g.h);
+  const sx = -(g.k ?? 0.04) * (g.cx - (g.vx ?? 530));
+  const BTL = add(FTL, [sx, -g.d]), BTR = add(FTR, [sx, -g.d]);
+  return { FTL, FTR, FBR, FBL, BTL, BTR, sx, g };
+}
+const lerpGeom = (a, b, p) => { const o = {}; for (const k in a) o[k] = typeof a[k] === 'number' ? lerp(a[k], b[k] ?? a[k], p) : a[k]; return o; };
+
+// ---------- layers ----------
+const svg = document.getElementById('stage');
+const L = { scenes: document.getElementById('scenes'), header: document.getElementById('header') };
+const scenes = [];
+function scene(id, build, draw) { const g = E('g', { id }, L.scenes); const s = { g, draw }; build(g, s); scenes.push(s); return s; }
+
+// ---------- header: typed breadcrumb, blinking cursor, progress rule ----------
+const HDR = '> BINARY HABIT / SPARK / PARTITIONS';
+const header = {};
+function buildHeader() {
+  const g = L.header;
+  header.rule = E('rect', { x: 66, y: 233.5, width: 948, height: 1.5, fill: '#C9C5B6' }, g);
+  header.prog = E('rect', { x: 66, y: 232, width: 0, height: 4, fill: '#2E4A86' }, g);
+  header.text = T(g, '', { class: 'hdr', x: 66, y: 220, 'font-size': 24.5, 'letter-spacing': 5.25, fill: '#4F493E' });
+  header.cursor = E('rect', { x: 757, y: 196, width: 14, height: 26, fill: C.orange }, g);
+  header.widths = [];
+}
+function measureHeader() {
+  for (let n = 0; n <= HDR.length; n++) {
+    header.text.textContent = HDR.slice(0, n);
+    header.widths[n] = n ? header.text.getComputedTextLength() : 0;
+  }
+}
+function drawHeader(t, src) {
+  // types in over the first 0.7 s, rubs out in the return to the opening frame
+  let n = Math.round(clamp(t * 46, 0, HDR.length));
+  if (t > DUR - 0.75) n = Math.round(HDR.length * (1 - prog(t, DUR - 0.75, DUR - 0.3)));
+  header.text.textContent = HDR.slice(0, n);
+  const typing = (t < 0.72) || (t > DUR - 0.8);
+  const blinkOn = src > 1.07 && src < 77.3 && ((src - 1.07) % 1.0625) < 0.533;
+  show(header.cursor, typing || blinkOn);
+  S(header.cursor, { x: f1(66 + header.widths[n] + (n ? 2 : -30 + 30)) });
+  const w = t < DUR - 0.75 ? 948 * clamp(t / (DUR - 0.27)) : 948 * clamp(t / (DUR - 0.27)) * (1 - prog(t, DUR - 0.75, DUR - 0.3, 'power2.inOut'));
+  S(header.prog, { width: f1(w) });
+}
+
+// =====================================================================================
+
+// Helpers
+function createRecord(g, id, cx, cy, label) {
+    const node = E('g', {id}, g);
+    E('path', { d: `M${cx-20} ${cy} L${cx} ${cy-10} L${cx+20} ${cy} L${cx} ${cy+10} Z`, fill: '#EFECE0', stroke: '#3A342C', 'stroke-width': 1 }, node);
+    E('path', { d: `M${cx-20} ${cy} L${cx-20} ${cy+10} L${cx} ${cy+20} L${cx} ${cy+10} Z`, fill: '#DCD8C9', stroke: '#3A342C', 'stroke-width': 1 }, node);
+    E('path', { d: `M${cx} ${cy+20} L${cx+20} ${cy+10} L${cx+20} ${cy} L${cx} ${cy+10} Z`, fill: '#E3DFD1', stroke: '#3A342C', 'stroke-width': 1 }, node);
+    T(node, label, { class: 'mono', x: cx, y: cy+2, 'font-size': 10, fill: C.ink, 'text-anchor': 'middle' });
+    return node;
+}
+
+function makeTray(g, cx, cy, title) {
+    const node = E('g', {}, g);
+    E('path', { d: `M${cx-60} ${cy} L${cx} ${cy-30} L${cx+60} ${cy} L${cx} ${cy+30} Z`, fill: 'none', stroke: '#CBC7B8', 'stroke-width': 2, 'stroke-dasharray': '4 2' }, node);
+    T(node, title, { class: 'sans', x: cx, y: cy-35, 'font-size': 14, fill: C.inkSoft, 'text-anchor': 'middle' });
+    return node;
+}
+
+function createExecutor(g, cx, cy, title) {
+    const node = E('g', {}, g);
+    E('path', { d: `M${cx-80} ${cy} L${cx} ${cy-40} L${cx+80} ${cy} L${cx} ${cy+40} Z`, fill: '#3D7A62', stroke: '#1E1A14', 'stroke-width': 2 }, node);
+    E('path', { d: `M${cx-80} ${cy} L${cx-80} ${cy+40} L${cx} ${cy+80} L${cx} ${cy+40} Z`, fill: '#2A5443', stroke: '#1E1A14', 'stroke-width': 2 }, node);
+    E('path', { d: `M${cx} ${cy+80} L${cx+80} ${cy+40} L${cx+80} ${cy} L${cx} ${cy+40} Z`, fill: '#356954', stroke: '#1E1A14', 'stroke-width': 2 }, node);
+    T(node, title, { class: 'mono', x: cx, y: cy+60, 'font-size': 14, fill: '#EFECE0', 'text-anchor': 'middle' });
+    return node;
+}
+
+// SCENE 1: WHY PARTITIONS EXIST (0–7 seconds)
+const s1 = scene('s1-intro', (g, s) => {
+  const title = T(g, 'WHY PARTITIONS EXIST', { class: 'display', x: 540, y: 300, 'font-size': 50, fill: C.ink, 'text-anchor': 'middle' });
+  const records = [];
+  for(let i=0; i<16; i++) {
+     records.push(createRecord(g, 'r'+i, 300 + (i%4)*40 - (Math.floor(i/4))*40, 500 + (i%4)*20 + (Math.floor(i/4))*20, 'R'+i));
+  }
+  s.draw = (time) => {
+    const p = clamp(time / 7, 0, 1);
+    g.style.opacity = p > 0 && p < 1 ? 1 : 0;
+
+    // Add some animation using the provided helpers and CSS
+    if (p > 0 && p < 1) {
+       for(let i=0; i<16; i++) {
+           const cy = 500 + (i%4)*20 + (Math.floor(i/4))*20 - Math.sin(p * Math.PI) * 50;
+           S(records[i], { transform: `translate(0, ${-Math.sin(p * Math.PI) * 20})` });
+       }
+    }
+  };
+});
+
+// SCENE 2: ONE DATASET BECOMES FOUR PARTITIONS (7–16 seconds)
+const s2 = scene('s2-divide', (g, s) => {
+  T(g, 'ONE DATASET BECOMES FOUR PARTITIONS', { class: 'display', x: 540, y: 300, 'font-size': 40, fill: C.ink, 'text-anchor': 'middle' });
+  const trays = [
+      makeTray(g, 200, 600, 'Partition 0'), makeTray(g, 400, 700, 'Partition 1'),
+      makeTray(g, 600, 800, 'Partition 2'), makeTray(g, 800, 900, 'Partition 3')
+  ];
+  const records = [];
+  for(let i=0; i<16; i++) {
+     records.push(createRecord(g, 'r2_'+i, 300 + (i%4)*40 - (Math.floor(i/4))*40, 500 + (i%4)*20 + (Math.floor(i/4))*20, 'R'+i));
+  }
+
+  s.draw = (time) => {
+    const p = clamp((time - 7) / 9, 0, 1);
+    g.style.opacity = p > 0 && p < 1 ? 1 : 0;
+
+    if (p > 0 && p < 1) {
+       for(let i=0; i<16; i++) {
+           const part = i % 4;
+           const targetX = 200 + part*200 - 300;
+           const targetY = 600 + part*100 - 500;
+           S(records[i], { transform: `translate(${targetX * prog(p, 0.2, 0.8)}, ${targetY * prog(p, 0.2, 0.8)})` });
+       }
+    }
+  };
+});
+
+// SCENE 3: TASKS ARE SCHEDULED ON EXECUTOR SLOTS (16–26 seconds)
+const s3 = scene('s3-schedule', (g, s) => {
+  T(g, 'TASKS ARE SCHEDULED ON EXECUTOR SLOTS', { class: 'display', x: 540, y: 300, 'font-size': 40, fill: C.ink, 'text-anchor': 'middle' });
+  const ex1 = createExecutor(g, 300, 600, 'Executor 1');
+  const ex2 = createExecutor(g, 700, 800, 'Executor 2');
+  s.draw = (time) => {
+    const p = clamp((time - 16) / 10, 0, 1);
+    g.style.opacity = p > 0 && p < 1 ? 1 : 0;
+    if (p > 0 && p < 1) {
+        S(ex1, { transform: `translate(0, ${-50 * (1 - p)})` });
+        S(ex2, { transform: `translate(0, ${-50 * (1 - p)})` });
+    }
+  };
+});
+
+// SCENE 4: PARALLEL PROCESSING (26–35 seconds)
+const s4 = scene('s4-parallel', (g, s) => {
+  T(g, 'PARALLEL PROCESSING', { class: 'display', x: 540, y: 300, 'font-size': 40, fill: C.ink, 'text-anchor': 'middle' });
+  const ex1 = createExecutor(g, 300, 600, 'Executor 1');
+  const ex2 = createExecutor(g, 700, 800, 'Executor 2');
+  s.draw = (time) => {
+    const p = clamp((time - 26) / 9, 0, 1);
+    g.style.opacity = p > 0 && p < 1 ? 1 : 0;
+    if (p > 0 && p < 1) {
+       const scale = 1 + 0.05 * Math.sin(p * Math.PI * 10);
+       S(ex1, { transform: `scale(${scale})`, 'transform-origin': '300px 600px' });
+       S(ex2, { transform: `scale(${scale})`, 'transform-origin': '700px 800px' });
+    }
+  };
+});
+
+// SCENE 5: NARROW TRANSFORM — FILTER STAYS LOCAL (35–44 seconds)
+const s5 = scene('s5-filter', (g, s) => {
+  T(g, 'NARROW TRANSFORM — FILTER STAYS LOCAL', { class: 'display', x: 540, y: 300, 'font-size': 40, fill: C.ink, 'text-anchor': 'middle' });
+  const records = [];
+  for(let i=0; i<16; i++) {
+     records.push(createRecord(g, 'r5_'+i, 300 + (i%4)*40 - (Math.floor(i/4))*40, 500 + (i%4)*20 + (Math.floor(i/4))*20, 'R'+i));
+  }
+  s.draw = (time) => {
+    const p = clamp((time - 35) / 9, 0, 1);
+    g.style.opacity = p > 0 && p < 1 ? 1 : 0;
+    if (p > 0.5 && p < 1) {
+        records[2].style.opacity = 0;
+        records[7].style.opacity = 0;
+        records[10].style.opacity = 0;
+        records[15].style.opacity = 0;
+    } else {
+        records[2].style.opacity = 1;
+        records[7].style.opacity = 1;
+        records[10].style.opacity = 1;
+        records[15].style.opacity = 1;
+    }
+  };
+});
+
+// SCENE 6: WIDE TRANSFORM — GROUPBY AND SHUFFLE (44–55 seconds)
+const s6 = scene('s6-groupby', (g, s) => {
+  T(g, 'WIDE TRANSFORM — GROUPBY AND SHUFFLE', { class: 'display', x: 540, y: 300, 'font-size': 40, fill: C.ink, 'text-anchor': 'middle' });
+  const records = [];
+  for(let i=0; i<12; i++) {
+     records.push(createRecord(g, 'r6_'+i, 200 + (i%3)*60, 500, 'R'+i));
+  }
+  s.draw = (time) => {
+    const p = clamp((time - 44) / 11, 0, 1);
+    g.style.opacity = p > 0 && p < 1 ? 1 : 0;
+    if (p > 0 && p < 1) {
+       for(let i=0; i<12; i++) {
+           const targetX = 600 + (i%4)*40;
+           const targetY = 700 + Math.floor(i/4)*40;
+           const startX = 200 + (i%3)*60;
+           S(records[i], { transform: `translate(${(targetX - startX) * p}, ${(targetY - 500) * p})` });
+       }
+    }
+  };
+});
+
+// SCENE 7: REPARTITION VERSUS COALESCE (55–65 seconds)
+const s7 = scene('s7-repartition', (g, s) => {
+  T(g, 'REPARTITION VERSUS COALESCE', { class: 'display', x: 540, y: 300, 'font-size': 40, fill: C.ink, 'text-anchor': 'middle' });
+  s.draw = (time) => {
+    const p = clamp((time - 55) / 10, 0, 1);
+    g.style.opacity = p > 0 && p < 1 ? 1 : 0;
+  };
+});
+
+// SCENE 8: DATA SKEW — ONE SLOW PARTITION (65–75 seconds)
+const s8 = scene('s8-skew', (g, s) => {
+  T(g, 'DATA SKEW — ONE SLOW PARTITION', { class: 'display', x: 540, y: 300, 'font-size': 40, fill: C.ink, 'text-anchor': 'middle' });
+  const trays = [
+      makeTray(g, 200, 600, 'Partition 0 (3)'), makeTray(g, 400, 650, 'Partition 1 (3)'),
+      makeTray(g, 600, 700, 'Partition 2 (3)'), makeTray(g, 800, 750, 'Partition 3 (15)')
+  ];
+  s.draw = (time) => {
+    const p = clamp((time - 65) / 10, 0, 1);
+    g.style.opacity = p > 0 && p < 1 ? 1 : 0;
+  };
+});
+
+// SCENE 9: HOW MANY PARTITIONS? (75–84 seconds)
+const s9 = scene('s9-howmany', (g, s) => {
+  T(g, 'HOW MANY PARTITIONS?', { class: 'display', x: 540, y: 300, 'font-size': 40, fill: C.ink, 'text-anchor': 'middle' });
+  s.draw = (time) => {
+    const p = clamp((time - 75) / 9, 0, 1);
+    g.style.opacity = p > 0 && p < 1 ? 1 : 0;
+  };
+});
+
+// SCENE 10: FINAL RECAP (84–90 seconds)
+const s10 = scene('s10-end', (g, s) => {
+  const endg = E('g', { opacity: 0 }, g);
+  T(endg, 'PARTITIONS ENABLE PARALLELISM', { class: 'display', x: 540, y: 700, 'font-size': 50, fill: C.ink, 'text-anchor': 'middle' });
+  T(endg, 'SMART DISTRIBUTION MAKES SPARK WORK EFFICIENTLY', { class: 'sans', x: 540, y: 760, 'font-size': 24, fill: C.inkSoft, 'text-anchor': 'middle' });
+  T(endg, 'APACHE SPARK / PARTITIONING', { class: 'mono', x: 540, y: 860, 'font-size': 18, fill: C.ink, 'text-anchor': 'middle' });
+
+  s.draw = (time) => {
+    const p = clamp((time - 84) / 6, 0, 1);
+    g.style.opacity = p > 0 ? 1 : 0;
+    endg.style.opacity = Math.min(p * 2, 1);
+  };
+});
+
+// =====================================================================================
+// render: one pure function of t
+// =====================================================================================
+let built = false;            // compare.html may call seek() before the fonts are in
+function render(t) {
+  if (!built) return;
+  const src = toSource(t);
+  for (const s of scenes) s.draw(src, s);
+  drawHeader(t, src);
+}
+
+const clock = { t: 0 };
+const tl = gsap.timeline({ paused: true, repeat: -1 });
+tl.fromTo(clock, { t: 0 }, { t: DUR, duration: DUR, ease: 'none', immediateRender: false, onUpdate: () => render(clock.t) });
+window.anim = {
+  tl, duration: DUR,
+  seek(t) { t = clamp(t, 0, DUR); tl.pause(); tl.time(t, true); render(t); },
+  play(from = 0) { tl.restart(); tl.time(from); tl.play(); },
+  pause() { tl.pause(); }
+};
+
+const qs = new URLSearchParams(location.search);
+const fontsReady = Promise.race([
+  Promise.all([
+    document.fonts.load('700 100px "Space Mono"', '0123456789'), document.fonts.load('24px "Silkscreen"', 'BINARY'),
+    document.fonts.load('400 24px "IBM Plex Mono"', 'SPARK'), document.fonts.load('500 24px "IBM Plex Mono"', 'ALL'),
+    document.fonts.load('600 24px "IBM Plex Mono"', 'key'), document.fonts.load('400 24px "IBM Plex Sans"', 'Episode'),
+    document.fonts.load('800 100px "Archivo"', 'SHUFFLE'), document.fonts.ready]),
+  new Promise(r => setTimeout(r, 6000))
+]);
+fontsReady.then(() => {
+  buildHeader(); measureHeader();
+  built = true;
+  anim.seek(0);
+  if (qs.has('t')) anim.seek(parseFloat(qs.get('t')));
+  else if (!qs.has('external')) tl.play(0);
+  document.documentElement.dataset.ready = '1';
+});
+})();
+</script>
+</body>
+</html>
